@@ -66,6 +66,7 @@ int main(int argc, char *argv[]) {
     // 数字が低いほど結合度が低い
     // TODO 3.1: '<'を実装してみよう
     // BinopPrecedenceに'<'を登録して下さい。
+    BinopPrecedence['<'] = 11;
     BinopPrecedence['+'] = 20;
     BinopPrecedence['-'] = 20;
     BinopPrecedence['*'] = 40;
@@ -73,7 +74,7 @@ int main(int argc, char *argv[]) {
     getNextToken();
 
     MainLoop();
-    
+
     write_output();
 
     return 0;
