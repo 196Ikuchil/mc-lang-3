@@ -50,12 +50,12 @@ namespace {
 
     // グローバル変数を定義するクラス
     class GlobalVariableExprAST : public ExprAST {
-        std::string g_variable;
+        std::string g_variable_name;
         std::unique_ptr<ExprAST> value; //TODO: NumberASTでよい？
 
         public:
-        GlobalVariableExprAST(const std::string &g_variable, std::unique_ptr<ExprAST> value)
-            : g_variable(g_variable), value(std::move(value)) {}
+        GlobalVariableExprAST(const std::string &g_variable_name, std::unique_ptr<ExprAST> value)
+            : g_variable_name(g_variable_name), value(std::move(value)) {}
         Value *codegen() override;
     };
 

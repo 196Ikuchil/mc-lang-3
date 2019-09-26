@@ -20,7 +20,7 @@ static std::unique_ptr<Module> myModule;
 static std::map<std::string, Value *> NamedValues;
 
 //この中にグローバル変数を追加していきたい
-static std::map<std::string, AllocaInst *> GlobalVariables;
+static std::map<std::string, Value *> GlobalVariables;
 // 最適化に利用する
 static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 
@@ -41,16 +41,23 @@ Value *VariableExprAST::codegen() {
     // NamedValuesの中にVariableExprAST::NameとマッチするValueがあるかチェックし、
     // あったらそのValueを返す。
     Value *V = NamedValues[variableName];
-    // if (!V)
-    //     *V = GlobalVariables[variableName]; //グローバル変数の中から探してみる
-    if (!V)
-        return LogErrorV("Unknown variable name");
-    return V;
+    if (V)
+        return V;
+    Value *G = GlobalVariables[variableName]; //グローバル変数の中から探してみる
+    if (G)
+        return G;
+    return LogErrorV("Unknown variable name");
 }
 
 Value *GlobalVariableExprAST::codegen(){
-    LogError("this is global declaration.");
-    return nullptr;
+    FunctionType *FT = FunctionType::get(Type::getInt64Ty(Context), false);
+    Function *globalVariableFunc = Function::Create(FT, Function::ExternalLinkage,"global_variables", myModule.get());
+    Builder.SetInsertPoint(llvm::BasicBlock::Create(Context, "", globalVariableFunc));
+
+    Value *V = Builder.CreateAlloca(Type::getInt64Ty(Context), nullptr, g_variable_name);
+    Builder.CreateStore(value->codegen(),V);
+    GlobalVariables[g_variable_name] = V;
+    return Builder.CreateRet(V);
 }
 
 // TODO 2.5: 関数呼び出しのcodegenを実装してみよう
@@ -250,7 +257,6 @@ static void HandleIntDefinition(){
     if (auto IntAST = ParseIntDefinition()){ //構文をパース
         if (auto *IntIR = IntAST->codegen()){
             IntIR->print(stream);
-            // InitializeModuleAndPassManager();
         }
     } else {
         getNextToken();
