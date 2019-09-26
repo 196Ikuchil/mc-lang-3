@@ -15,7 +15,14 @@ static IRBuilder<> Builder(Context);
 // このModuleはC++ Moduleとは何の関係もなく、LLVM IRを格納するトップレベルオブジェクトです。
 static std::unique_ptr<Module> myModule;
 // 変数名とllvm::Valueのマップを保持する
+
+// 変数の名前(str)に対応する値(AllocaInst?)を対応づけているはず
 static std::map<std::string, Value *> NamedValues;
+
+//この中にグローバル変数を追加していきたい
+static std::map<std::string, AllocaInst *> GlobalVariables;
+// 最適化に利用する
+static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 
 // https://llvm.org/doxygen/classllvm_1_1Value.html
 // llvm::Valueという、LLVM IRのオブジェクトでありFunctionやModuleなどを構成するクラスを使います
@@ -34,9 +41,16 @@ Value *VariableExprAST::codegen() {
     // NamedValuesの中にVariableExprAST::NameとマッチするValueがあるかチェックし、
     // あったらそのValueを返す。
     Value *V = NamedValues[variableName];
+    // if (!V)
+    //     *V = GlobalVariables[variableName]; //グローバル変数の中から探してみる
     if (!V)
         return LogErrorV("Unknown variable name");
     return V;
+}
+
+Value *GlobalVariableExprAST::codegen(){
+    LogError("this is global declaration.");
+    return nullptr;
 }
 
 // TODO 2.5: 関数呼び出しのcodegenを実装してみよう
@@ -111,6 +125,7 @@ Function *PrototypeAST::codegen() {
 
     return F;
 }
+
 
 Function *FunctionAST::codegen() {
     // この関数が既にModuleに登録されているか確認
@@ -231,6 +246,17 @@ static void HandleDefinition() {
     }
 }
 
+static void HandleIntDefinition(){
+    if (auto IntAST = ParseIntDefinition()){ //構文をパース
+        if (auto *IntIR = IntAST->codegen()){
+            IntIR->print(stream);
+            // InitializeModuleAndPassManager();
+        }
+    } else {
+        getNextToken();
+    }
+}
+
 // その名の通りtop level expressionをcodegenします。例えば、「2+1;3+3;」というファイルが
 // 入力だった場合、この関数は最初の「2+1」をcodegenして返ります。(そしてMainLoopからまだ呼び出されます)
 static void HandleTopLevelExpression() {
@@ -257,6 +283,9 @@ static void MainLoop() {
                 return;
             case tok_def:
                 HandleDefinition();
+                break;
+            case tok_int:
+                HandleIntDefinition();
                 break;
             case ';': // ';'で始まった場合、無視します
                 getNextToken();
