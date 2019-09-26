@@ -17,10 +17,9 @@ static std::unique_ptr<Module> myModule;
 // 変数名とllvm::Valueのマップを保持する
 // 変数の名前(str)に対応する値(AllocaInst?)を対応づけているはず
 static std::map<std::string, AllocaInst *> NamedValues;
-//この中にグローバル変数を追加していきたい
-static std::map<std::string, AllocaInst *> GlobalVariables;
 // 最適化に利用する
 static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
+
 
 // https://llvm.org/doxygen/classllvm_1_1Value.html
 // llvm::Valueという、LLVM IRのオブジェクトでありFunctionやModuleなどを構成するクラスを使います
@@ -41,22 +40,45 @@ static AllocaInst *CreateEntryBlockAlloca(Function *function, const std::string 
     return TmpB.CreateAlloca(Type::getInt64Ty(Context),0,VarName.c_str());
 }
 
+Value *getConstInt(std::string Name){
+    myModule->getOrInsertGlobal(Name,Type::getInt64Ty(Context));
+    GlobalVariable *gVar = myModule->getNamedGlobal(Name);
+    return cast<Value>(gVar->getInitializer());
+}
+
 // TODO 2.4: 引数のcodegenを実装してみよう
 Value *VariableExprAST::codegen() {
     // NamedValuesの中にVariableExprAST::NameとマッチするValueがあるかチェックし、
     // あったらそのValueを返す。
     Value *V = NamedValues[variableName];
-    // if (!V)
-    //     *V = GlobalVariables[variableName]; //グローバル変数の中から探してみる
-    if (!V)
-        return LogErrorV("Unknown variable name");
-    return Builder.CreateLoad(V,variableName.c_str());
+    if (V)
+        return Builder.CreateLoad(V,variableName.c_str());
+
+    Value *G = getConstInt(variableName);
+    if (G)
+        return G;
+
+    return LogErrorV("Unknown variable name");
+
 }
 
-Value *GlobalVariableExprAST::codegen(){
-    LogError("this is global declaration.");
-    return nullptr;
+GlobalVariable *createConstInt( std::string Name,ConstantInt* value) {
+      LogError("G");
+  myModule->getOrInsertGlobal(Name,Type::getInt64Ty(Context));
+
+  GlobalVariable *gVar = myModule->getNamedGlobal(Name);
+  gVar->setLinkage(GlobalValue::CommonLinkage);
+  gVar->setAlignment(4);
+  gVar->setConstant(false);
+  gVar->setInitializer(value);
+  return gVar;
+
 }
+
+GlobalVariable *ConstVariableExprAST::codegen(){
+    return createConstInt(g_variable_name,cast<ConstantInt>(value->codegen()));
+}
+
 
 // TODO 2.5: 関数呼び出しのcodegenを実装してみよう
 Value *CallExprAST::codegen() {
@@ -89,7 +111,7 @@ Value *BinaryAST::codegen() {
     Value *R = RHS->codegen();
     if (!L || !R)
         return nullptr;
-
+            // LogError(Builder.getFunctionName().c_str);
     switch (Op) {
         case '+':
             // LLVM IR Builerを使い、この二項演算のIRを作る
@@ -135,6 +157,7 @@ Function *PrototypeAST::codegen() {
 Function *FunctionAST::codegen() {
     // この関数が既にModuleに登録されているか確認
     Function *function = myModule->getFunction(proto->getFunctionName());
+
     // 関数名が見つからなかったら、新しくこの関数のIRクラスを作る。
     if (!function)
         function = proto->codegen();
@@ -155,23 +178,29 @@ Function *FunctionAST::codegen() {
         // 引数をシンボルテーブルに追加する。
         NamedValues[Arg.getName()] = Alloca;
     }
+
+     Value *V;
     // 関数のbody(ExprASTから継承されたNumberASTかBinaryAST)をcodegenする
-    if (Value *RetVal = body->codegen()) {
-        // returnのIRを作る
-        Builder.CreateRet(RetVal);
-
-        // https://llvm.org/doxygen/Verifier_8h.html
-        // 関数の検証
-        verifyFunction(*function);
-        //最適化かな？
-        TheFPM->run(*function);
-
-        return function;
+    for (auto &b : body) {
+        V = b->codegen();
+        if (!V){
+            // もし関数のbodyがnullptrなら、この関数をModuleから消す。
+            function->eraseFromParent();
+            return nullptr;
+        }
     }
+    Builder.CreateRet(V);
+    // Builder.CreateRet(V);
 
-    // もし関数のbodyがnullptrなら、この関数をModuleから消す。
-    function->eraseFromParent();
-    return nullptr;
+    // https://llvm.org/doxygen/Verifier_8h.html
+    // 関数の検証
+    verifyFunction(*function);
+    //最適化かな？
+    TheFPM->run(*function);
+
+    //グローバル変数
+
+    return function;
 }
 
 Value *IfExprAST::codegen() {
@@ -271,18 +300,17 @@ static void HandleDefinition() {
     if (auto FnAST = ParseDefinition()) {
         if (auto *FnIR = FnAST->codegen()) {
             FnIR->print(stream);
-            InitializeModuleAndPassManager();
         }
     } else {
         getNextToken();
     }
 }
 
-static void HandleIntDefinition(){
-    if (auto IntAST = ParseIntDefinition()){ //構文をパース
+static void HandleConstIntDefinition(){
+    if (auto IntAST = ParseConstIntDefinition()){ //構文をパース
         if (auto *IntIR = IntAST->codegen()){
             IntIR->print(stream);
-            // InitializeModuleAndPassManager();
+            InitializeModuleAndPassManager();
         }
     } else {
         getNextToken();
@@ -296,8 +324,6 @@ static void HandleTopLevelExpression() {
     if (auto FnAST = ParseTopLevelExpr()) {
         // できたASTをcodegenします。
         if (auto *FnIR = FnAST->codegen()) {
-            InitializeModuleAndPassManager();
-            streamstr = "";
             FnIR->print(stream);
         }
     } else {
@@ -318,8 +344,8 @@ static void MainLoop() {
             case tok_def:
                 HandleDefinition();
                 break;
-            case tok_int:
-                HandleIntDefinition();
+            case tok_constant:
+                HandleConstIntDefinition();
                 break;
             case ';': // ';'で始まった場合、無視します
                 getNextToken();

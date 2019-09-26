@@ -46,17 +46,19 @@ namespace {
         public:
         VariableExprAST(const std::string &variableName) : variableName(variableName) {}
         Value *codegen() override;
+        const std::string &getName() const { return variableName; }
     };
 
     // グローバル変数を定義するクラス
-    class GlobalVariableExprAST : public ExprAST {
-        std::string g_variable;
+    class ConstVariableExprAST : public ExprAST {
+        std::string g_variable_name;
         std::unique_ptr<ExprAST> value; //TODO: NumberASTでよい？
 
         public:
-        GlobalVariableExprAST(const std::string &g_variable, std::unique_ptr<ExprAST> value)
-            : g_variable(g_variable), value(std::move(value)) {}
-        Value *codegen() override;
+        ConstVariableExprAST(const std::string &g_variable_name, std::unique_ptr<ExprAST> value)
+            : g_variable_name(g_variable_name), value(std::move(value)) {}
+        GlobalVariable *codegen() override;
+        const std::string &getName() const { return g_variable_name; }
     };
 
     // CallExprAST - 関数呼び出しを表すクラス
@@ -89,11 +91,11 @@ namespace {
     // 表すクラスです。
     class FunctionAST {
         std::unique_ptr<PrototypeAST> proto;
-        std::unique_ptr<ExprAST> body;
+        std::vector<std::unique_ptr<ExprAST>> body;
 
         public:
         FunctionAST(std::unique_ptr<PrototypeAST> proto,
-                std::unique_ptr<ExprAST> body)
+                std::vector<std::unique_ptr<ExprAST>> body)
             : proto(std::move(proto)), body(std::move(body)) {}
 
         Function *codegen();
@@ -350,28 +352,33 @@ static std::unique_ptr<FunctionAST> ParseDefinition() {
     auto proto = ParsePrototype();
     if (!proto)
         return nullptr;
+    std::vector<std::unique_ptr<ExprAST>> Es;
+    while(true){
 
-    if (auto E = ParseExpression())
-        return llvm::make_unique<FunctionAST>(std::move(proto), std::move(E));
-    return nullptr;
+        if (auto E = ParseExpression())
+            Es.push_back(std::move(E));
+
+        else
+            return nullptr;
+
+        if (CurTok!=';')
+            break;
+        getNextToken();
+        LogError("loop");
+    }
+    return llvm::make_unique<FunctionAST>(std::move(proto), std::move(Es));
 }
 
 // おそらくidentifierStrにintが入った状態でここに来る
-static std::unique_ptr<GlobalVariableExprAST> ParseIntDefinition(){
-    getNextToken(); //intを消費
+static std::unique_ptr<ConstVariableExprAST> ParseConstIntDefinition(){
+    getNextToken(); //constを消費
     if (CurTok!=tok_identifier)
         return nullptr;
     auto g_variable_name = lexer.getIdentifier();//変数名取得
     getNextToken(); //変数名を消費
 
-    if (CurTok!='='){ //次にはイコールが来るはずである
-        return nullptr;
-    }
-
-    //数字だけ読み取る
-    getNextToken(); //'='を消費
     if(auto I = ParseNumberExpr())
-        return llvm::make_unique<GlobalVariableExprAST>(g_variable_name,std::move(I));
+        return llvm::make_unique<ConstVariableExprAST>(g_variable_name,std::move(I));
     return nullptr;
 }
 
@@ -389,10 +396,12 @@ static std::unique_ptr<ExprAST> ParseExpression() {
 // パーサーのトップレベル関数。まだ関数定義は実装しないので、今のmc言語では
 // __anon_exprという関数がトップレベルに作られ、その中に全てのASTが入る。
 static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+    auto Proto = llvm::make_unique<PrototypeAST>("__anon_expr",
+            std::vector<std::string>());
+    std::vector<std::unique_ptr<ExprAST>> Es;
     if (auto E = ParseExpression()) {
-        auto Proto = llvm::make_unique<PrototypeAST>("__anon_expr",
-                std::vector<std::string>());
-        return llvm::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+        Es.push_back(std::move(E));
+        return llvm::make_unique<FunctionAST>(std::move(Proto), std::move(Es));
     }
     return nullptr;
 }

@@ -16,7 +16,8 @@ enum Token {
     tok_if = -5,
     tok_then = -6,
     tok_else = -7,
-    tok_int = -8
+    tok_int = -8,
+    tok_constant = -9
 };
 
 class Lexer {
@@ -53,6 +54,8 @@ class Lexer {
                     return tok_else;
                 if (identifierStr == "int")
                     return tok_int;
+                if (identifierStr == "const")
+                    return tok_constant;
 
                 return tok_identifier;
             }
