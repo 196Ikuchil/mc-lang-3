@@ -48,6 +48,17 @@ namespace {
         Value *codegen() override;
     };
 
+    // グローバル変数を定義するクラス
+    class GlobalVariableExprAST : public ExprAST {
+        std::string g_variable;
+        std::unique_ptr<ExprAST> value; //TODO: NumberASTでよい？
+
+        public:
+        GlobalVariableExprAST(const std::string &g_variable, std::unique_ptr<ExprAST> value)
+            : g_variable(g_variable), value(std::move(value)) {}
+        Value *codegen() override;
+    };
+
     // CallExprAST - 関数呼び出しを表すクラス
     class CallExprAST : public ExprAST {
         std::string callee;
@@ -344,6 +355,26 @@ static std::unique_ptr<FunctionAST> ParseDefinition() {
         return llvm::make_unique<FunctionAST>(std::move(proto), std::move(E));
     return nullptr;
 }
+
+// おそらくidentifierStrにintが入った状態でここに来る
+static std::unique_ptr<GlobalVariableExprAST> ParseIntDefinition(){
+    getNextToken(); //intを消費
+    if (CurTok!=tok_identifier)
+        return nullptr;
+    auto g_variable_name = lexer.getIdentifier();//変数名取得
+    getNextToken(); //変数名を消費
+
+    if (CurTok!='='){ //次にはイコールが来るはずである
+        return nullptr;
+    }
+
+    //数字だけ読み取る
+    getNextToken(); //'='を消費
+    if(auto I = ParseNumberExpr())
+        return llvm::make_unique<GlobalVariableExprAST>(g_variable_name,std::move(I));
+    return nullptr;
+}
+
 
 // ExprASTは1. 数値リテラル 2. '('から始まる演算 3. 二項演算子の三通りが考えられる為、
 // 最初に1,2を判定して、そうでなければ二項演算子だと思う。
