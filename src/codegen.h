@@ -15,7 +15,7 @@ static IRBuilder<> Builder(Context);
 // このModuleはC++ Moduleとは何の関係もなく、LLVM IRを格納するトップレベルオブジェクトです。
 static std::unique_ptr<Module> myModule;
 // 変数名とllvm::Valueのマップを保持する
-static std::map<std::string, Value *> NamedValues;
+static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 
 // https://llvm.org/doxygen/classllvm_1_1Value.html
 // llvm::Valueという、LLVM IRのオブジェクトでありFunctionやModuleなどを構成するクラスを使います
@@ -138,6 +138,8 @@ Function *FunctionAST::codegen() {
         // https://llvm.org/doxygen/Verifier_8h.html
         // 関数の検証
         verifyFunction(*function);
+        //最適化かな？
+        TheFPM->run(*function);
 
         return function;
     }
@@ -218,6 +220,23 @@ Value *IfExprAST::codegen() {
 // mc.cppでMainLoop()が呼ばれます。MainLoopは各top level expressionに対して
 // HandleTopLevelExpressionを呼び、その中でASTを作り再帰的にcodegenをしています。
 //===----------------------------------------------------------------------===//
+static void InitializeModuleAndPassManager() {
+    myModule = llvm::make_unique<Module>("my cool jit", Context);
+
+    // Create a new pass manager attached to it.
+    TheFPM = make_unique<legacy::FunctionPassManager>(myModule.get());
+
+    // Do simple "peephole" optimizations and bit-twiddling optzns.
+    TheFPM->add(createInstructionCombiningPass());
+    // Reassociate expressions.
+    TheFPM->add(createReassociatePass());
+    // Eliminate Common SubExpressions.
+    TheFPM->add(createGVNPass());
+    // Simplify the control flow graph (deleting unreachable blocks, etc).
+    TheFPM->add(createCFGSimplificationPass());
+
+    TheFPM->doInitialization();
+}
 
 static std::string streamstr;
 static llvm::raw_string_ostream stream(streamstr);
@@ -225,6 +244,7 @@ static void HandleDefinition() {
     if (auto FnAST = ParseDefinition()) {
         if (auto *FnIR = FnAST->codegen()) {
             FnIR->print(stream);
+            InitializeModuleAndPassManager();
         }
     } else {
         getNextToken();
@@ -238,6 +258,7 @@ static void HandleTopLevelExpression() {
     if (auto FnAST = ParseTopLevelExpr()) {
         // できたASTをcodegenします。
         if (auto *FnIR = FnAST->codegen()) {
+            InitializeModuleAndPassManager();
             streamstr = "";
             FnIR->print(stream);
         }
@@ -248,7 +269,7 @@ static void HandleTopLevelExpression() {
 }
 
 static void MainLoop() {
-    myModule = llvm::make_unique<Module>("my cool jit", Context);
+    InitializeModuleAndPassManager();
     while (true) {
         switch (CurTok) {
             case tok_eof:
