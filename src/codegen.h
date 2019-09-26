@@ -15,6 +15,9 @@ static IRBuilder<> Builder(Context);
 // このModuleはC++ Moduleとは何の関係もなく、LLVM IRを格納するトップレベルオブジェクトです。
 static std::unique_ptr<Module> myModule;
 // 変数名とllvm::Valueのマップを保持する
+// 変数の名前(str)に対応する値(AllocaInst?)を対応づけているはず
+static std::map<std::string, AllocaInst *> NamedValues;
+// 最適化に利用する
 static std::unique_ptr<legacy::FunctionPassManager> TheFPM;
 
 // https://llvm.org/doxygen/classllvm_1_1Value.html
@@ -29,6 +32,13 @@ Value *LogErrorV(const char *str) {
     return nullptr;
 }
 
+/// CreateEntryBlockAlloca - alloca命令を関数のentryブロックに生成する。
+/// これは変更可能な変数などのために使われる。
+static AllocaInst *CreateEntryBlockAlloca(Function *function, const std::string &VarName){
+    IRBuilder<> TmpB(&function->getEntryBlock(),function->getEntryBlock().begin());
+    return TmpB.CreateAlloca(Type::getInt64Ty(Context),0,VarName.c_str());
+}
+
 // TODO 2.4: 引数のcodegenを実装してみよう
 Value *VariableExprAST::codegen() {
     // NamedValuesの中にVariableExprAST::NameとマッチするValueがあるかチェックし、
@@ -36,7 +46,7 @@ Value *VariableExprAST::codegen() {
     Value *V = NamedValues[variableName];
     if (!V)
         return LogErrorV("Unknown variable name");
-    return V;
+    return Builder.CreateLoad(V,variableName.c_str());
 }
 
 // TODO 2.5: 関数呼び出しのcodegenを実装してみよう
@@ -127,9 +137,14 @@ Function *FunctionAST::codegen() {
 
     // Record the function arguments in the NamedValues map.
     NamedValues.clear();
-    for (auto &Arg : function->args())
-        NamedValues[Arg.getName()] = &Arg;
-
+    for (auto &Arg : function->args()){
+        // この変数のためのallocaを生成する。
+        AllocaInst *Alloca = CreateEntryBlockAlloca(function,Arg.getName());
+        // allocaの中に初期値を保存する。
+        Builder.CreateStore(&Arg,Alloca);
+        // 引数をシンボルテーブルに追加する。
+        NamedValues[Arg.getName()] = Alloca;
+    }
     // 関数のbody(ExprASTから継承されたNumberASTかBinaryAST)をcodegenする
     if (Value *RetVal = body->codegen()) {
         // returnのIRを作る
@@ -226,6 +241,8 @@ static void InitializeModuleAndPassManager() {
     // Create a new pass manager attached to it.
     TheFPM = make_unique<legacy::FunctionPassManager>(myModule.get());
 
+    // Promote allocas to registers. 追加したmem2reg
+    TheFPM->add(createPromoteMemoryToRegisterPass());
     // Do simple "peephole" optimizations and bit-twiddling optzns.
     TheFPM->add(createInstructionCombiningPass());
     // Reassociate expressions.
