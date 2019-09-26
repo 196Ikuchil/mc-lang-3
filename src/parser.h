@@ -99,6 +99,18 @@ namespace {
 
         Value *codegen() override;
     };
+
+    class VarExprAST : public ExprAST {
+        std::vector<std::pair<std::string,std::unique_ptr<ExprAST>>> VarNames;
+        std::unique_ptr<ExprAST> Body;
+
+        public:
+        VarExprAST(std::vector<std::pair<std::string,std::unique_ptr<ExprAST>>> VarNames,
+                std::unique_ptr<ExprAST> Body)
+            : VarNames(std::move(VarNames)) , Body(std::move(Body)) {}
+
+        Value *codegen() override;
+    };
 } // end anonymous namespace
 
 //===----------------------------------------------------------------------===//
@@ -249,6 +261,51 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
     // 7. IfExprASTを作り、returnします。
     return llvm::make_unique<IfExprAST>(std::move(condition),std::move(then_expr), std::move(else_expr));
 }
+/// varexpr ::= 'var' identifier ('=' expression)?
+//                    (',' identifier ('=' expression)?)* 'in' expression
+// inはfor文で使用していたらしいので今回は未実装
+static ExprAST *ParseVarExpr(){
+    getNextToken(); //varを消費
+
+    std::vector<std::pair<std::string, ExprAST*>> varNames;
+
+    //変数名
+    if (CurTok!=tok_identifier)
+        return LogError("expected identifier after var");
+
+    while(1){
+        std::string name = lexer.getIdentifier();
+        getNextToken(); //識別子を消費
+        //オプションの初期化
+        std::unique_ptr<ExprAST> Init;
+        if (CurTok=='='){
+            getNextToken(); // =を消費
+            init = ParseExpression();
+            it(!init) return nullptr;
+        }
+        varNames.push_back(std::make_pair(name,std::move(Init)));
+
+        //変数定義の終わり判定
+        if (CurTok!=',')break;
+        // ','を消費
+        getNextToken();
+
+        if (CurTok!=tok_identifier)
+            return LogError("expected identifier list after var");
+    }
+
+    if (CurTok != tok_in) //in を消費
+      return LogError("expected 'in' keyword after 'var'");
+    getNextToken();
+
+    auto body = ParseExpression();
+    if (!body)
+        return nullptr;
+
+    return std::make_unique<VarExprAST>(std::move(varNames),
+                                       std::move(body));
+
+}
 
 // ParsePrimary - NumberASTか括弧をパースする関数
 static std::unique_ptr<ExprAST> ParsePrimary() {
@@ -263,6 +320,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
             return ParseParenExpr();
         case tok_if:
             return ParseIfExpr();
+        case tok_var:
+            return ParseVarExpr();
     }
 }
 

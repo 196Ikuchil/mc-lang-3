@@ -16,6 +16,7 @@ enum Token {
     tok_if = -5,
     tok_then = -6,
     tok_else = -7
+    tok_var = -13
 };
 
 class Lexer {
@@ -50,6 +51,9 @@ class Lexer {
                     return tok_then;
                 if (identifierStr == "else")
                     return tok_else;
+
+                if (identifierStr == "var")
+                    return tok_var;
 
                 return tok_identifier;
             }
