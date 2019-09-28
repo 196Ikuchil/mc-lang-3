@@ -246,7 +246,7 @@ Value *IfExprAST::codegen() {
 // HandleTopLevelExpressionを呼び、その中でASTを作り再帰的にcodegenをしています。
 //===----------------------------------------------------------------------===//
 static void InitializeModuleAndPassManager() {
-    myModule = llvm::make_unique<Module>("my cool jit", Context);
+    // myModule = llvm::make_unique<Module>("my cool jit", Context);
 
     // Create a new pass manager attached to it.
     TheFPM = make_unique<legacy::FunctionPassManager>(myModule.get());
@@ -307,6 +307,7 @@ static void HandleTopLevelExpression() {
 }
 
 static void MainLoop() {
+    myModule = llvm::make_unique<Module>("my cool jit", Context);
     InitializeModuleAndPassManager();
     while (true) {
         switch (CurTok) {
