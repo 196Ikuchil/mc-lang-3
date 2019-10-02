@@ -32,6 +32,7 @@ class Lexer {
             while (isspace(lastChar))
                 lastChar = getNextChar(iFile);
 
+
             // TODO 2.1: 識別子をトークナイズする
             // 1.3と同様に、今読んでいる文字がアルファベットだった場合はアルファベットで
             // なくなるまで読み込み、その値をidentifierStrにセットする。
@@ -41,6 +42,7 @@ class Lexer {
                 identifierStr = lastChar;
                 while (isalnum((lastChar = getNextChar(iFile))))
                     identifierStr += lastChar;
+
 
                 if (identifierStr == "def")
                     return tok_def;
